@@ -191,7 +191,7 @@ static void tcp_reply_func(struct ReplyAddress* addr, char* msg, int size) {
 
 
 class SC_UdpInPort {
-    struct World* mWorld;
+    World* mWorld;
     int mPortNum;
     std::string mbindTo;
     boost::array<char, kTextBufSize> recvBuffer;
@@ -206,7 +206,7 @@ class SC_UdpInPort {
         if (error == boost::asio::error::operation_aborted)
             return; /* we're done */
 
-        if (error == boost::asio::error::connection_refused) {
+        if (error == boost::asio::error::connection_refused || error == boost::asio::error::connection_reset) {
             // avoid windows error message
             startReceiveUDP();
             return;
@@ -245,10 +245,14 @@ class SC_UdpInPort {
                                                  asio::placeholders::bytes_transferred));
     }
 
+    static constexpr int receiveBufferSize = 4 * 1024 * 1024;
+    static constexpr int sendBufferSize = 4 * 1024 * 1024;
+    static constexpr int fallbackBufferSize = 1 * 1024 * 1024;
+
 public:
     boost::asio::ip::udp::socket udpSocket;
 
-    SC_UdpInPort(struct World* world, std::string bindTo, int inPortNum):
+    SC_UdpInPort(World* world, std::string bindTo, int inPortNum):
         mWorld(world),
         mPortNum(inPortNum),
         mbindTo(bindTo),
@@ -261,8 +265,37 @@ public:
         if (inPortNum == 0)
             mPortNum = udpSocket.local_endpoint().port();
 
-        boost::asio::socket_base::send_buffer_size option(65536);
-        udpSocket.set_option(option);
+        try {
+            boost::asio::socket_base::send_buffer_size sendBufferSize;
+            udpSocket.get_option(sendBufferSize);
+            int defaultBufferSize = sendBufferSize.value();
+            if (defaultBufferSize < SC_UdpInPort::sendBufferSize) {
+                sendBufferSize = SC_UdpInPort::sendBufferSize;
+                boost::system::error_code ec;
+                udpSocket.set_option(sendBufferSize, ec);
+                if (ec && defaultBufferSize < SC_UdpInPort::fallbackBufferSize) {
+                    sendBufferSize = SC_UdpInPort::fallbackBufferSize;
+                    udpSocket.set_option(sendBufferSize);
+                }
+            }
+        } catch (boost::system::system_error& e) { printf("WARNING: failed to set send buffer size (%s)\n", e.what()); }
+
+        try {
+            boost::asio::socket_base::receive_buffer_size receiveBufferSize;
+            udpSocket.get_option(receiveBufferSize);
+            int defaultBufferSize = receiveBufferSize.value();
+            if (defaultBufferSize < SC_UdpInPort::receiveBufferSize) {
+                receiveBufferSize = SC_UdpInPort::receiveBufferSize;
+                boost::system::error_code ec;
+                udpSocket.set_option(receiveBufferSize, ec);
+                if (ec && defaultBufferSize < SC_UdpInPort::fallbackBufferSize) {
+                    receiveBufferSize = SC_UdpInPort::fallbackBufferSize;
+                    udpSocket.set_option(receiveBufferSize);
+                }
+            }
+        } catch (boost::system::system_error& e) {
+            printf("WARNING: failed to set receive buffer size (%s)\n", e.what());
+        }
 
 #ifdef USE_RENDEZVOUS
         if (world->mRendezvous) {
@@ -278,11 +311,11 @@ public:
 
 class SC_TcpConnection : public boost::enable_shared_from_this<SC_TcpConnection> {
 public:
-    struct World* mWorld;
+    World* mWorld;
     typedef boost::shared_ptr<SC_TcpConnection> pointer;
     boost::asio::ip::tcp::socket socket;
 
-    SC_TcpConnection(struct World* world, boost::asio::io_context& ioContext, class SC_TcpInPort* parent):
+    SC_TcpConnection(World* world, boost::asio::io_context& ioContext, class SC_TcpInPort* parent):
         mWorld(world),
         socket(ioContext),
         mParent(parent) {}
@@ -390,7 +423,7 @@ private:
 };
 
 class SC_TcpInPort {
-    struct World* mWorld;
+    World* mWorld;
     boost::asio::ip::tcp::acceptor acceptor;
 
 #ifdef USE_RENDEZVOUS
@@ -401,7 +434,7 @@ class SC_TcpInPort {
     friend class SC_TcpConnection;
 
 public:
-    SC_TcpInPort(struct World* world, const std::string& bindTo, int inPortNum, int inMaxConnections, int inBacklog):
+    SC_TcpInPort(World* world, const std::string& bindTo, int inPortNum, int inMaxConnections, int inBacklog):
         mWorld(world),
         acceptor(ioContext, boost::asio::ip::tcp::endpoint(boost::asio::ip::make_address(bindTo), inPortNum)),
         mAvailableConnections(inMaxConnections) {
@@ -528,11 +561,11 @@ template <typename T, typename... Args> static bool protectedOpenPort(const char
     return false;
 }
 
-SCSYNTH_DLLEXPORT_C int World_OpenUDP(struct World* inWorld, const char* bindTo, int inPort) {
+SCSYNTH_DLLEXPORT_C int World_OpenUDP(World* inWorld, const char* bindTo, int inPort) {
     return protectedOpenPort<SC_UdpInPort>("UDP", inWorld, bindTo, inPort);
 }
 
-SCSYNTH_DLLEXPORT_C int World_OpenTCP(struct World* inWorld, const char* bindTo, int inPort, int inMaxConnections,
+SCSYNTH_DLLEXPORT_C int World_OpenTCP(World* inWorld, const char* bindTo, int inPort, int inMaxConnections,
                                       int inBacklog) {
     return protectedOpenPort<SC_TcpInPort>("TCP", inWorld, bindTo, inPort, inMaxConnections, inBacklog);
 }

@@ -30,6 +30,7 @@
 
 #include <QApplication>
 #include <QDebug>
+#include <QGestureEvent>
 #include <QGraphicsView>
 #include <QKeyEvent>
 #include <QPainter>
@@ -79,20 +80,19 @@ GenericCodeEditor::GenericCodeEditor(Document* doc, QWidget* parent):
 
     mOverlayAnimator = new OverlayAnimator(this, mOverlay);
 
-    connect(mDoc, SIGNAL(defaultFontChanged()), this, SLOT(onDocumentFontChanged()));
+    connect(mDoc, &Document::defaultFontChanged, this, &GenericCodeEditor::onDocumentFontChanged);
 
-    connect(this, SIGNAL(blockCountChanged(int)), mLineIndicator, SLOT(setLineCount(int)));
+    connect(this, &GenericCodeEditor::blockCountChanged, mLineIndicator, &LineIndicator::setLineCount);
 
-    connect(mLineIndicator, SIGNAL(widthChanged()), this, SLOT(updateLayout()));
+    connect(mLineIndicator, &LineIndicator::widthChanged, this, &GenericCodeEditor::updateLayout);
 
-    connect(this, SIGNAL(updateRequest(QRect, int)), this, SLOT(updateLineIndicator(QRect, int)));
+    connect(this, &GenericCodeEditor::updateRequest, this, &GenericCodeEditor::updateLineIndicator);
 
-    connect(this, SIGNAL(selectionChanged()), mLineIndicator, SLOT(update()));
-    connect(this, SIGNAL(selectionChanged()), this, SLOT(updateDocLastSelection()));
-    connect(this, SIGNAL(cursorPositionChanged()), this, SLOT(onCursorPositionChanged()));
+    connect(this, &GenericCodeEditor::selectionChanged, mLineIndicator, [=]() { mLineIndicator->update(); });
+    connect(this, &GenericCodeEditor::selectionChanged, this, &GenericCodeEditor::updateDocLastSelection);
+    connect(this, &GenericCodeEditor::cursorPositionChanged, this, &GenericCodeEditor::onCursorPositionChanged);
 
-    connect(Main::instance(), SIGNAL(applySettingsRequest(Settings::Manager*)), this,
-            SLOT(applySettings(Settings::Manager*)));
+    connect(Main::instance(), &Main::applySettingsRequest, this, &GenericCodeEditor::applySettings);
 
     QTextDocument* tdoc = doc->textDocument();
     QPlainTextEdit::setDocument(tdoc);
@@ -100,6 +100,9 @@ GenericCodeEditor::GenericCodeEditor(Document* doc, QWidget* parent):
     doc->setLastActiveEditor(this);
 
     applySettings(Main::settings());
+
+    grabGesture(Qt::PinchGesture);
+    setAttribute(Qt::WA_AcceptTouchEvents);
 }
 
 GenericCodeEditor::~GenericCodeEditor() {
@@ -457,6 +460,18 @@ QString GenericCodeEditor::symbolUnderCursor() {
     return tokenInStringAt(position, blockString);
 }
 
+bool GenericCodeEditor::gestureEvent(QGestureEvent* event) {
+    if (QGesture* pinch = event->gesture(Qt::PinchGesture)) {
+        auto* pinchGesture = static_cast<QPinchGesture*>(pinch);
+        if (pinchGesture->state() == Qt::GestureUpdated) {
+            float scaleFactor = pinchGesture->scaleFactor();
+            zoomFont(scaleFactor);
+        }
+        return true;
+    }
+    return false;
+}
+
 bool GenericCodeEditor::event(QEvent* event) {
     switch (event->type()) {
     case QEvent::ShortcutOverride: {
@@ -470,6 +485,9 @@ bool GenericCodeEditor::event(QEvent* event) {
             return true;
         }
         break;
+    }
+    case QEvent::Gesture: {
+        return gestureEvent(static_cast<QGestureEvent*>(event));
     }
     default:
         break;
@@ -679,7 +697,7 @@ void GenericCodeEditor::mousePressEvent(QMouseEvent* e) {
                                          .arg(e->position().x())
                                          .arg(e->position().y())
 #endif
-                                         .arg(e->modifiers())
+                                         .arg(static_cast<Qt::KeyboardModifiers::Int>(e->modifiers()))
                                          .arg(button),
                                      true);
     }
@@ -713,7 +731,7 @@ void GenericCodeEditor::mouseDoubleClickEvent(QMouseEvent* e) {
                                          .arg(e->position().x())
                                          .arg(e->position().y())
 #endif
-                                         .arg(e->modifiers())
+                                         .arg(static_cast<Qt::KeyboardModifiers::Int>(e->modifiers()))
                                          .arg(button),
                                      true);
     }
@@ -747,7 +765,7 @@ void GenericCodeEditor::mouseReleaseEvent(QMouseEvent* e) {
                                          .arg(e->position().x())
                                          .arg(e->position().y())
 #endif
-                                         .arg(e->modifiers())
+                                         .arg(static_cast<Qt::KeyboardModifiers::Int>(e->modifiers()))
                                          .arg(button),
                                      true);
     }
@@ -854,11 +872,21 @@ void GenericCodeEditor::resetFontSize() { mDoc->resetDefaultFont(); }
 
 void GenericCodeEditor::zoomFont(int steps) {
     QFont currentFont = mDoc->defaultFont();
-    const int newSize = currentFont.pointSize() + steps;
-    if (newSize <= 0)
-        return;
-    currentFont.setPointSize(newSize);
+    const float newSize = clampFontSize(currentFont.pointSizeF() + steps);
+    currentFont.setPointSizeF(newSize);
     mDoc->setDefaultFont(currentFont);
+}
+
+void GenericCodeEditor::zoomFont(float scaler) {
+    QFont currentFont = mDoc->defaultFont();
+    const float newSize = clampFontSize(currentFont.pointSizeF() * scaler);
+    currentFont.setPointSizeF(newSize);
+    mDoc->setDefaultFont(currentFont);
+}
+
+float GenericCodeEditor::clampFontSize(float newSize) {
+    float defaultFontSize = Main::settings()->codeFont().pointSizeF();
+    return std::clamp(newSize, defaultFontSize * 0.5f, defaultFontSize * 8.0f);
 }
 
 void GenericCodeEditor::onDocumentFontChanged() {

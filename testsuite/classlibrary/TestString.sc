@@ -165,6 +165,20 @@ TestString : UnitTest {
 		this.assertEquals(result, expected);
 	}
 
+	test_absolutePath_Windows {
+		var drive;
+		if (thisProcess.platform.name == \windows) {
+			drive = Platform.resourceDir[..1];
+			this.assertEquals("C:/test".absolutePath, "C:/test", "absolute path <drive>:/");
+			this.assertEquals("C:\\test".absolutePath, "C:\\test", "absolute path <drive>:\\");
+			this.assertEquals("\\\\system07\\test".absolutePath, "\\\\system07\\test", "absolute path UNC");
+			this.assertEquals("/test".absolutePath, drive ++ "/test", "path starting with /");
+			this.assertEquals("\\test".absolutePath, drive ++ "\\test", "path starting with \\");
+			this.assertEquals("~/test".absolutePath, "~/test".standardizePath, "path starting with ~");
+			this.assertEquals("test".absolutePath, File.getcwd +/+ "test", "relative path");
+		}
+	}
+
 	// ------- time-related operations -----------------------------------------------
 
 	test_asSecs_stringDddHhMmSsSss_convertsToSeconds {
@@ -203,5 +217,11 @@ TestString : UnitTest {
 	test_findRegexp_emptyResult {
 		var result = "the quick brown fox".findRegexp("moo");
 		this.assertEquals(result, Array.new, "Non-matching findRegexp should return empty array");
+	}
+
+	test_largeStringCompileString {
+		var large = String.fill(81920, { |i| "0123456789".wrapAt(i) });
+		var reconstructed = large.asCompileString.interpret;
+		this.assert(large == reconstructed, "A large string's compileString should interpret back to itself");
 	}
 }

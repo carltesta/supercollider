@@ -48,6 +48,8 @@ const size_t ERR_BUF_SIZE(512);
         mMsgData = (char*)World_Alloc(mWorld, mMsgSize);                                                               \
         ReturnSCErrIfNil(mMsgData);                                                                                    \
         msg.getb(mMsgData, mMsgSize);                                                                                  \
+    } else if (msg.nextTag() == 'i') {                                                                                 \
+        msg.geti(0);                                                                                                   \
     }
 
 void PerformCompletionMsg(World* inWorld, OSC_Packet* inPacket);
@@ -279,6 +281,9 @@ int BufAllocCmd::Init(char* inData, int inSize) {
 
     GET_COMPLETION_MSG(msg);
 
+    auto sampleRate = msg.getf(0);
+    mSampleRate = sampleRate > 0.0 ? sampleRate : mWorld->mSampleRate;
+
     return kSCErr_None;
 }
 
@@ -287,7 +292,7 @@ void BufAllocCmd::CallDestructor() { this->~BufAllocCmd(); }
 bool BufAllocCmd::Stage2() {
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
     mFreeData = buf->data;
-    SCErr err = bufAlloc(buf, mNumChannels, mNumFrames, mWorld->mFullRate.mSampleRate);
+    SCErr err = bufAlloc(buf, mNumChannels, mNumFrames, mSampleRate);
     if (err) {
         scprintf("/b_alloc: memory allocation failed\n");
         return false;
@@ -1483,12 +1488,12 @@ bool SendReplyCmd::Stage2() {
 
 ///////////////////////////////////////////////////////////////////////////
 
-int PerformAsynchronousCommand(
+SCErr PerformAsynchronousCommand(
     World* inWorld, void* replyAddr, const char* cmdName, void* cmdData,
     AsyncStageFn stage2, // stage2 is non real time
     AsyncStageFn stage3, // stage3 is real time - completion msg performed if stage3 returns true
     AsyncStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
-    AsyncFreeFn cleanup, int completionMsgSize, void* completionMsgData) {
+    AsyncFreeFn cleanup, int completionMsgSize, const void* completionMsgData) {
     void* space = World_Alloc(inWorld, sizeof(AsyncPlugInCmd));
     ReturnSCErrIfNil(space);
     AsyncPlugInCmd* cmd = new (space) AsyncPlugInCmd(inWorld, (ReplyAddress*)replyAddr, cmdName, cmdData, stage2,
@@ -1510,7 +1515,7 @@ AsyncPlugInCmd::AsyncPlugInCmd(
     AsyncStageFn stage3, // stage3 is real time - completion msg performed if stage3 returns true
     AsyncStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
     AsyncFreeFn cleanup, // cleanup is called in real time
-    int completionMsgSize, void* completionMsgData):
+    int completionMsgSize, const void* completionMsgData):
     SC_SequencedCommand(inWorld, inReplyAddress),
     mCmdName(cmdName),
     mCmdData(cmdData),

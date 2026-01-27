@@ -28,6 +28,7 @@ PyrObject represents the structure of all SC Objects.
 #include "PyrSlot.h"
 
 #include <vector>
+#include <cstdint>
 
 /* special gc colors */
 enum {
@@ -66,8 +67,9 @@ enum {
         immutable : set if object may not be updated.
         finalize : set if object requires finalization.
         marked : used by garbage collector debug sanity check. may be used by primitives but must be cleared before
-   exiting primitive. gc_color : GC color : black, grey, white, free, permanent scratch1 : undefined value. may be used
-   within primitives as a temporary scratch value.
+   exiting primitive.
+   gc_color : GC color : black, grey, white, free, permanent
+   scratch1 : undefined value. may be used within primitives as a temporary scratch value.
 */
 
 struct PyrObjectHdr {
@@ -109,15 +111,15 @@ struct PyrFloatArray : public PyrObjectHdr {
 };
 
 struct PyrInt32Array : public PyrObjectHdr {
-    uint32 i[1];
+    uint32_t i[1];
 };
 
 struct PyrInt16Array : public PyrObjectHdr {
-    uint16 i[1];
+    uint16_t i[1];
 };
 
 struct PyrInt8Array : public PyrObjectHdr {
-    uint8 b[1];
+    uint8_t b[1];
 };
 
 struct PyrString : public PyrObjectHdr {
@@ -226,18 +228,30 @@ bool isSubclassOf(struct PyrClass* classobj, struct PyrClass* testclass);
 
 extern struct PyrClass* gTagClassTable[16];
 
-inline struct PyrClass* classOfSlot(PyrSlot* slot) {
-    PyrClass* classobj;
-    int tag;
-    if (IsFloat(slot))
-        classobj = class_float;
-    else if ((tag = GetTag(slot) & 0xF) == 1)
-        classobj = slotRawObject(slot)->classptr;
-    else
-        classobj = gTagClassTable[tag];
-
-    return classobj;
+struct PyrClass* PyrSlot::getClass() {
+    switch (getTagAsU16(u_raw)) {
+    case getTagAsU16(Tags::symTag):
+        return gTagClassTable[tagSym];
+    case getTagAsU16(Tags::intTag):
+        return gTagClassTable[tagInt];
+    case getTagAsU16(Tags::charTag):
+        return gTagClassTable[tagChar];
+    case getTagAsU16(Tags::objHdrTag):
+        return getObjectHdr()->classptr;
+    case getTagAsU16(Tags::ptrTag):
+        return gTagClassTable[tagPtr];
+    case getTagAsU16(Tags::nilTag):
+        return gTagClassTable[tagNil];
+    case getTagAsU16(Tags::trueTag):
+        return gTagClassTable[tagTrue];
+    case getTagAsU16(Tags::falseTag):
+        return gTagClassTable[tagFalse];
+    default:
+        return class_float;
+    }
 }
+
+inline struct PyrClass* classOfSlot(PyrSlot* slot) { return slot->getClass(); }
 
 typedef int (*ObjFuncPtr)(struct VMGlobals*, struct PyrObject*);
 
@@ -251,7 +265,6 @@ void fillSlots(PyrSlot* slot, int size, PyrSlot* fillslot);
 void nilSlots(PyrSlot* slot, int size);
 void zeroSlots(PyrSlot* slot, int size);
 
-int calcHash(PyrSlot* a);
 int getIndexedFloat(struct PyrObject* obj, int index, float* value);
 int getIndexedDouble(struct PyrObject* obj, int index, double* value);
 
@@ -265,9 +278,11 @@ void getIndexedSlot(struct PyrObject* obj, PyrSlot* a, int index);
 int putIndexedSlot(struct VMGlobals* g, struct PyrObject* obj, PyrSlot* c, int index);
 int putIndexedFloat(PyrObject* obj, double val, int index);
 
-inline long ARRAYMAXINDEXSIZE(PyrObjectHdr* obj) { return (1L << obj->obj_sizeclass); }
+inline std::int64_t ARRAYMAXINDEXSIZE(PyrObjectHdr* obj) { return (1LL << obj->obj_sizeclass); }
 
-inline long MAXINDEXSIZE(PyrObjectHdr* obj) { return ((1L << obj->obj_sizeclass) * gFormatElemCapc[obj->obj_format]); }
+inline std::int64_t MAXINDEXSIZE(PyrObjectHdr* obj) {
+    return ((1LL << obj->obj_sizeclass) * gFormatElemCapc[obj->obj_format]);
+}
 
 std::tuple<int, std::vector<std::string>> PyrCollToVectorStdString(PyrObject* coll);
 

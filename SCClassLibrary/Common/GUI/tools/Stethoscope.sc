@@ -437,8 +437,9 @@ Stethoscope {
 		);
 		^true;
 	}
-	
+
 	bounds_ { arg rect;
+		rect = rect ?? { view.bounds };
 		if( window.notNil ) {
 			if (rect.width < 264) {
 				"The width value you set will be changed to 264, the minimum width.".postln;
@@ -464,12 +465,9 @@ BusScopeSynth {
 	}
 
 	play { arg bufSize, bus, cycle;
-		var synthDef;
-		var synthArgs;
-		var bufIndex;
-		var busChannels;
+		var synthDef, synthArgs, bufIndex, busChannels;
 
-		if(server.serverRunning.not) { ^this };
+		if(server.warnIfNotRunning(thisMethod)) { ^this };
 
 		this.stop;
 

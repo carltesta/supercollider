@@ -46,8 +46,8 @@ Prerequisites:
 - **git, cmake >= 3.12, libsndfile, readline, and qt6 >= 6.2**, installed via homebrew:
   `brew install git cmake libsndfile readline qt@6`
 
-- If you want to build with the *supernova* server, you need **portaudio** and **fftw** packages, which can also be installed via homebrew:
-  `brew install portaudio fftw`
+- If you want to build with the *supernova* server, you need **portaudio** package, which can also be installed via homebrew:
+  `brew install portaudio`
 
 Obtaining the source code
 -------------------------
@@ -78,10 +78,11 @@ You can see the available build options with ```cmake -LH```.
 
 To install, you may move this to /Applications or use it in place from the build directory.
 
-**Qt 5.15 compatibility**: For the time being, SuperCollider can still be built against Qt 5.15. Note that in order to build with Qt5, Qt6 needs to be uninstalled or unlinked:
+**Qt 5.15 compatibility**:  
+**Qt5 is outdated** and will soon be deprecated. It is strongly advised to build with Qt6. If your system also has Qt5 installed you may have to adjust your brew and shell config. In order to build with Qt5, Qt6 needs to be uninstalled or unlinked:
 
-    brew unlink qt@5
-    cmake -G Xcode -DCMAKE_PREFIX_PATH=`brew --prefix qt@5` -DSUPERNOVA=ON ..
+    brew unlink qt@6
+    cmake -G Xcode -DCMAKE_PREFIX_PATH=`brew --prefix qt@5` ..
     cmake --build . --target install --config RelWithDebInfo
 
 More info on *supernova* can be found in the section **Frequently used cmake settings** below.
@@ -210,6 +211,14 @@ Common arguments to control the build configuration are:
 
     `-DNATIVE=ON`
 
+  * Set architecture level (`-march`) and/or cpu type (`-mcpu`) when Native is OFF
+
+    ```shell
+    -D SC_COMPILER_ARCH_FLAGS="-march=haswell" # default for x86_64
+    -D SC_COMPILER_ARCH_FLAGS="-mcpu=apple-m1" # default for arm64
+    -D SC_COMPILER_ARCH_FLAGS="-Xarch_x86_64 -march=haswell -Xarch_arm64 -mcpu=apple-m1" # default for universal builds
+    ```
+
   * Build the *supernova* server:
 
     `-DSUPERNOVA=ON`
@@ -274,8 +283,10 @@ Using ccache with Xcode
 -----------------------
 
 Although cmake does not support using `ccache` with Xcode out of the box, this project is set up to
-allow it with the option `-DRULE_LAUNCH_COMPILE=ccache`. This can speed up build times
+support it. By default, ccache will be used if it's present on your system. This can speed up build times
 significantly, even when the build directory has been cleared.
+
+Using `ccache` can be disabled by setting cmake option `-D USE_CCACHE=OFF`.
 
 Building without Qt or the IDE
 ------------------------------

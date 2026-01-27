@@ -25,6 +25,7 @@
 #include "../core/settings/manager.hpp"
 #include "../core/settings/theme.hpp"
 #include "../core/util/overriding_action.hpp"
+#include "editor.hpp"
 
 #include <QApplication>
 #include <QScreen>
@@ -53,7 +54,10 @@ PostWindow::PostWindow(QWidget* parent): QPlainTextEdit(parent) {
 
     setContextMenuPolicy(Qt::ActionsContextMenu);
 
-    connect(this, SIGNAL(scrollToBottomRequest()), this, SLOT(scrollToBottom()), Qt::QueuedConnection);
+    connect(this, &PostWindow::scrollToBottomRequest, this, &PostWindow::scrollToBottom, Qt::QueuedConnection);
+
+    grabGesture(Qt::PinchGesture);
+    setAttribute(Qt::WA_AcceptTouchEvents);
 
     applySettings(Main::settings());
 }
@@ -68,8 +72,8 @@ void PostWindow::createActions(Settings::Manager* settings) {
     action->setShortcut(QKeySequence::Copy);
     action->setShortcutContext(Qt::WidgetShortcut);
     action->setEnabled(false);
-    connect(action, SIGNAL(triggered()), this, SLOT(copy()));
-    connect(this, SIGNAL(copyAvailable(bool)), action, SLOT(setEnabled(bool)));
+    connect(action, &QAction::triggered, this, &PostWindow::copy);
+    connect(this, &PostWindow::copyAvailable, action, &QAction::setEnabled);
     addAction(action);
 
     mActions[Clear] = action = new QAction(tr("Clear"), this);
@@ -77,7 +81,7 @@ void PostWindow::createActions(Settings::Manager* settings) {
     action->setShortcutContext(Qt::ApplicationShortcut);
     action->setShortcut(tr("Ctrl+Shift+P", "Clear post window"));
     settings->addAction(action, "post-clear", postCategory);
-    connect(action, SIGNAL(triggered()), this, SLOT(clear()));
+    connect(action, &QAction::triggered, this, &PostWindow::clear);
     addAction(action);
 
     action = new QAction(this);
@@ -86,23 +90,23 @@ void PostWindow::createActions(Settings::Manager* settings) {
 
     mActions[DocClose] = ovrAction = new OverridingAction(tr("Close"), this);
     action->setStatusTip(tr("Close the current document"));
-    connect(ovrAction, SIGNAL(triggered()), this, SLOT(closeDocument()));
+    connect(ovrAction, &QAction::triggered, this, &PostWindow::closeDocument);
     ovrAction->addToWidget(this);
 
     mActions[ZoomIn] = ovrAction = new OverridingAction(tr("Enlarge Font"), this);
     ovrAction->setIconText("+");
     ovrAction->setStatusTip(tr("Enlarge post window font"));
-    connect(ovrAction, SIGNAL(triggered()), this, SLOT(zoomIn()));
+    connect(ovrAction, &QAction::triggered, this, &PostWindow::zoomIn);
     ovrAction->addToWidget(this);
 
     mActions[ZoomOut] = ovrAction = new OverridingAction(tr("Shrink Font"), this);
     ovrAction->setIconText("-");
     ovrAction->setStatusTip(tr("Shrink post window font"));
-    connect(ovrAction, SIGNAL(triggered()), this, SLOT(zoomOut()));
+    connect(ovrAction, &QAction::triggered, this, &PostWindow::zoomOut);
     ovrAction->addToWidget(this);
 
     mActions[ResetZoom] = ovrAction = new OverridingAction(tr("Reset Font Size"), this);
-    connect(ovrAction, SIGNAL(triggered()), this, SLOT(resetZoom()));
+    connect(ovrAction, &QAction::triggered, this, &PostWindow::resetZoom);
     ovrAction->addToWidget(this);
 
     action = new QAction(this);
@@ -113,14 +117,14 @@ void PostWindow::createActions(Settings::Manager* settings) {
     action->setStatusTip(tr("Wrap lines wider than the post window"));
     action->setCheckable(true);
     addAction(action);
-    connect(action, SIGNAL(triggered(bool)), this, SLOT(setLineWrap(bool)));
+    connect(action, &QAction::triggered, this, &PostWindow::setLineWrap);
     settings->addAction(action, "post-line-wrap", postCategory);
 
     mActions[AutoScroll] = action = new QAction(tr("Auto Scroll"), this);
     action->setStatusTip(tr("Scroll to bottom on new posts"));
     action->setCheckable(true);
     action->setChecked(true);
-    connect(action, SIGNAL(triggered(bool)), this, SLOT(onAutoScrollTriggered(bool)));
+    connect(action, &QAction::triggered, this, &PostWindow::onAutoScrollTriggered);
     addAction(action);
     settings->addAction(action, "post-auto-scroll", postCategory);
 }
@@ -248,10 +252,15 @@ void PostWindow::zoomOut(int steps) { zoomFont(-steps); }
 
 void PostWindow::zoomFont(int steps) {
     QFont currentFont = font();
-    const int newSize = currentFont.pointSize() + steps;
-    if (newSize <= 0)
-        return;
-    currentFont.setPointSize(newSize);
+    const float newSize = GenericCodeEditor::clampFontSize(currentFont.pointSizeF() + steps);
+    currentFont.setPointSizeF(newSize);
+    setFont(currentFont);
+}
+
+void PostWindow::zoomFont(float scaler) {
+    QFont currentFont = font();
+    const float newSize = GenericCodeEditor::clampFontSize(currentFont.pointSizeF() * scaler);
+    currentFont.setPointSizeF(newSize);
     setFont(currentFont);
 }
 
@@ -270,6 +279,10 @@ bool PostWindow::event(QEvent* event) {
             event->accept();
             return true;
         }
+        break;
+    }
+    case QEvent::Gesture: {
+        return gestureEvent(static_cast<QGestureEvent*>(event));
         break;
     }
     default:
@@ -329,6 +342,19 @@ QMimeData* PostWindow::createMimeDataFromSelection() const {
     QMimeData* data = new QMimeData;
     data->setText(textCursor().selection().toPlainText());
     return data;
+}
+
+
+bool PostWindow::gestureEvent(QGestureEvent* event) {
+    if (QGesture* pinch = event->gesture(Qt::PinchGesture)) {
+        auto* pinchGesture = static_cast<QPinchGesture*>(pinch);
+        if (pinchGesture->state() == Qt::GestureUpdated) {
+            float scaleFactor = pinchGesture->scaleFactor();
+            zoomFont(scaleFactor);
+        }
+        return true;
+    }
+    return false;
 }
 
 bool PostWindow::openDocumentation() { return Main::openDocumentation(symbolUnderCursor()); }

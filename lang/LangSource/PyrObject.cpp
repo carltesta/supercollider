@@ -54,6 +54,14 @@
 #    include <parallel/algorithm>
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#    define PRAGMA_IVDEP _Pragma("GCC ivdep")
+#elif defined(_MSC_VER)
+#    define PRAGMA_IVDEP __pragma(loop(ivdep))
+#else
+#    define PRAGMA_IVDEP
+#endif
+
 
 PyrClass* gClassList = nullptr;
 int gNumSelectors = 0;
@@ -288,22 +296,20 @@ void initSymbols() {
     SetFloat(&o_ftwo, 2.);
     SetFloat(&o_inf, std::numeric_limits<double>::infinity());
 
-    slotCopy(&gSpecialValues[svNil], &o_nil);
-    slotCopy(&gSpecialValues[svFalse], &o_false);
-    slotCopy(&gSpecialValues[svTrue], &o_true);
+    gSpecialValues.Nil_ = o_nil;
+    gSpecialValues.True = o_true;
+    gSpecialValues.False = o_false;
+    gSpecialValues.Inf = o_inf;
 
-    slotCopy(&gSpecialValues[svNegOne], &o_negone);
-    slotCopy(&gSpecialValues[svZero], &o_zero);
-    slotCopy(&gSpecialValues[svOne], &o_one);
-    slotCopy(&gSpecialValues[svTwo], &o_two);
-
-    slotCopy(&gSpecialValues[svFHalf], &o_fhalf);
-    slotCopy(&gSpecialValues[svFNegOne], &o_fnegone);
-    slotCopy(&gSpecialValues[svFZero], &o_fzero);
-    slotCopy(&gSpecialValues[svFOne], &o_fone);
-    slotCopy(&gSpecialValues[svFTwo], &o_ftwo);
-    slotCopy(&gSpecialValues[svInf], &o_inf);
-
+    gSpecialNumbers.MinusOne = o_negone;
+    gSpecialNumbers.Zero = o_zero;
+    gSpecialNumbers.One = o_one;
+    gSpecialNumbers.Two = o_two;
+    gSpecialNumbers.Half = o_fhalf;
+    gSpecialNumbers.MinusOneFloat = o_fnegone;
+    gSpecialNumbers.ZeroFloat = o_fzero;
+    gSpecialNumbers.OneFloat = o_fone;
+    gSpecialNumbers.TwoFloat = o_ftwo;
 
     gFormatElemSize[obj_notindexed] = sizeof(PyrSlot);
     gFormatElemSize[obj_slot] = sizeof(PyrSlot);
@@ -1055,7 +1061,7 @@ static void binsortClassRows(PyrMethod const** bigTable, const ColumnDescriptor*
         PyrMethod const** row = bigTable + j * numSelectors;
         memcpy(temprow, row, numSelectors * sizeof(PyrMethod*));
 
-#pragma GCC ivdep
+        PRAGMA_IVDEP
         for (int i = 0; i < numSelectors; ++i)
             row[i] = temprow[sels[i].selectorIndex];
     }
@@ -1349,7 +1355,7 @@ static size_t fillClassRow(const PyrClass* classobj, PyrMethod** bigTable, boost
     if (superclassobj) {
         PyrMethod** superrow = bigTable + slotRawInt(&superclassobj->classIndex) * gNumSelectors;
 
-#pragma GCC ivdep
+        PRAGMA_IVDEP
         for (int i = 0; i != gNumSelectors; ++i) {
             myrow[i] = superrow[i];
             if (superrow[i])
@@ -1494,6 +1500,8 @@ PyrClass* makeIntrinsicClass(PyrSymbol* className, PyrSymbol* superClassName, in
     SetInt(&metaclassobj->classFlags, slotRawInt(&metaclassobj->classFlags) | classIsIntrinsic);
 
     if (metaSuperClassName && classClassNumInstVars) {
+        assert(!metaclassobj->iprototype.isNil());
+        assert(!metaSuperClass->iprototype.isNil());
         memcpy(slotRawObject(&metaclassobj->iprototype)->slots, slotRawObject(&metaSuperClass->iprototype)->slots,
                sizeof(PyrSlot) * classClassNumInstVars);
         memcpy(slotRawSymbolArray(&metaclassobj->instVarNames)->symbols,
@@ -2371,7 +2379,7 @@ void nilSlots(PyrSlot* slot, int size) { fillSlots(slot, size, &o_nil); }
 
 void zeroSlots(PyrSlot* slot, int size) {
     PyrSlot zero;
-    SetTagRaw(&zero, 0);
+    SetRaw(&zero, 0);
     SetRaw(&zero, 0.0);
     fillSlots(slot, size, &zero);
 }
@@ -2780,9 +2788,7 @@ std::tuple<int, std::vector<std::string>> PyrCollToVectorStdString(PyrObject* co
     for (int i = 0; i < coll->size; ++i) {
         PyrSlot argSlot;
         getIndexedSlot(coll, &argSlot, i);
-        int error;
-        std::string string;
-        std::tie(error, string) = slotStrStdStrVal(&argSlot);
+        auto [error, string] = slotStrStdStrVal(&argSlot);
         if (error != errNone) {
             strings.clear();
             return std::make_tuple(error, strings);
@@ -2790,51 +2796,6 @@ std::tuple<int, std::vector<std::string>> PyrCollToVectorStdString(PyrObject* co
         strings.push_back(std::move(string));
     }
     return make_tuple(errNone, std::move(strings));
-}
-
-static int hashPtr(void* ptr) {
-    int32 hashed_part = int32((size_t)ptr & 0xffffffff);
-    return Hash(hashed_part);
-}
-
-int calcHash(PyrSlot* a);
-int calcHash(PyrSlot* a) {
-    int hash;
-    switch (GetTag(a)) {
-    case tagObj:
-        hash = hashPtr(slotRawObject(a));
-        break;
-    case tagInt:
-        hash = Hash(slotRawInt(a));
-        break;
-    case tagChar:
-        hash = Hash(slotRawChar(a) & 255);
-        break;
-    case tagSym:
-        hash = slotRawSymbol(a)->hash;
-        break;
-    case tagNil:
-        hash = 0xA5A5A5A5;
-        break;
-    case tagFalse:
-        hash = 0x55AA55AA;
-        break;
-    case tagTrue:
-        hash = 0x69696969;
-        break;
-    case tagPtr:
-        hash = hashPtr(slotRawPtr(a));
-        break;
-    default:
-        // hash for a double
-        union {
-            int32 i[2];
-            double d;
-        } u;
-        u.d = slotRawFloat(a);
-        hash = Hash(u.i[0] + Hash(u.i[1]));
-    }
-    return hash;
 }
 
 void InstallFinalizer(VMGlobals* g, PyrObject* inObj, int slotIndex, ObjFuncPtr inFunc) {

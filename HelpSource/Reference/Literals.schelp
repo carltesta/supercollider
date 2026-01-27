@@ -94,7 +94,11 @@ code::
 Hexidecimal numbers notated with code::0x:: may only be expressed as integers.
 
 subsection::Scale Degrees
-Integer numbers as scale degrees supports accidentals notation by adding the suffixes strong::s:: for sharp and strong::b:: for flat. Accidentals are represented as floating point values.
+Integer numbers as scale degrees supports accidentals notation by adding the suffixes strong::s:: for sharp and strong::b:: for flat. 
+Accidentals are represented as floating point values, 
+where each 0.1 of difference to the nearest integer corresponds to 100 cents (i.e., a semitone in 12TET).
+While the digit to the left of the decimal separator is a degree, and thus is affected by tuning and scale, 
+the digits to the right are not, and are always in cents. (See link::Classes/Scale#-degreeToRatio::)
 
 code::
 2s == 2.1  // scale degree two, sharp
@@ -216,6 +220,22 @@ a.size // 9
 
 The SuperCollider IDE uses UTF-8 to decode and display strings.
 See link::Classes/String#Character encodings##String:: for more information.
+
+A string literal may comprise no more than 81916 characters (bytes). A
+string object can be larger as a result of string operations.
+
+code::
+// artificially generate a long string
+a = String.fill(81920, { "abcdefghijklmnopqrstuvwxyz".choose });
+
+// wrap it in quote marks to make it a literal
+a = "\"" ++ a ++ "\"";
+
+// interpret the literal
+b = a.interpret;
+
+b.size;  // 81916 and NOT 81920
+::
 
 section::Identifiers
 

@@ -32,10 +32,6 @@ endif()
 
 find_package(Qt${QT_VERSION_MAJOR} ${REQUIRED_QT_VERSION} COMPONENTS ${QT_IDE_COMPONENTS} REQUIRED)
 
-if(${CMAKE_COMPILER_IS_GNUCXX})
-    add_definitions(-Wreorder)
-endif()
-
 if (APPLE)
   include (${CMAKE_SOURCE_DIR}/cmake_modules/MacAppFolder.cmake)
   set(ide_name ${scappbundlename})
@@ -52,7 +48,8 @@ if(APPLE)
         endforeach()
     endif()
 
-    foreach(file ${Sounds})
+    set(AdditionalStaticFiles ${Examples} ${Sounds})
+    foreach(file ${AdditionalStaticFiles})
         string(REPLACE ${CMAKE_SOURCE_DIR} "" PathInBundle ${file} )
         get_filename_component(PathInBundle "${PathInBundle}" DIRECTORY)
         set_source_files_properties(${file} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/${PathInBundle})
@@ -278,10 +275,6 @@ endif()
 # This sets up the exe icon for windows.
 if(WIN32)
  set(RES_FILES ${CMAKE_SOURCE_DIR}/platform/windows/Resources/scide.rc)
- set(CMAKE_RC_COMPILER_INIT windres)
- ENABLE_LANGUAGE(RC)
- SET(CMAKE_RC_COMPILE_OBJECT
- "<CMAKE_RC_COMPILER> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>")
 endif(WIN32)
 
 
@@ -317,6 +310,10 @@ add_executable( SuperCollider MACOSX_BUNDLE core/main_function.cpp ${RES_FILES} 
 
 set_target_properties(libscide PROPERTIES PREFIX "")
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(libscide PRIVATE "-Wreorder")
+endif()
+
 if(APPLE)
     set_target_properties(SuperCollider PROPERTIES OUTPUT_NAME "${ide_name}")
     if(NOT SC_DISABLE_XCODE_CODESIGNING)
@@ -334,9 +331,6 @@ target_link_libraries( libscide PUBLIC
 )
 
 target_link_libraries( SuperCollider libscide)
-
-target_link_libraries( libscide PUBLIC boost_system_lib)
-include_directories(${boost_include_dirs})
 
 # This makes sclang/scide work with a Qt installation at a fixed location.
 set_property(TARGET libscide SuperCollider PROPERTY INSTALL_RPATH_USE_LINK_PATH TRUE)
@@ -494,7 +488,7 @@ if(APPLE OR WIN32)
             ")
         endif()
         set(VERIFY_CMD "include(BundleUtilities)")
-        if("${QT_VERSION_MAJOR}" GREATER_EQUAL 6 AND SC_USE_QTWEBENGINE)
+        if("${QT_VERSION_MAJOR}" GREATER_EQUAL 6 AND "${Qt6_VERSION}" VERSION_LESS "6.9.3" AND SC_USE_QTWEBENGINE)
             # Fix deployment with qt from homebrew
             execute_process(COMMAND brew --prefix OUTPUT_VARIABLE BREW_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
             get_target_property(QtCore_location Qt${QT_VERSION_MAJOR}::Core LOCATION)
@@ -515,7 +509,6 @@ if(APPLE OR WIN32)
             endif()
         endif()
         if(SUPERNOVA)
-            get_target_property(LINK_FFTW libsupernova SUPERNOVA_FFTW)
             string(APPEND DEPLOY_CMD "
                 -executable=${CONTENTS_DIR}/Resources/supernova
                 -executable=${CONTENTS_DIR}/Resources/plugins/DiskIO_UGens_supernova.scx

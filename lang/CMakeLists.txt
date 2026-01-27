@@ -5,8 +5,6 @@ include_directories(${CMAKE_SOURCE_DIR}/include/common
                     ${CMAKE_SOURCE_DIR}/include/server
                     ${CMAKE_SOURCE_DIR}/common
 
-                    ${CMAKE_SOURCE_DIR}/external_libraries/boost_sync/include
-
                     LangSource
                     LangPrimSource
 
@@ -65,6 +63,7 @@ set(sclang_sources
 	LangSource/PyrParseNode.cpp
 	LangSource/PyrSignal.cpp
 	LangSource/PyrSymbolTable.cpp
+    LangSource/SC_CLIOptions.cpp
 	LangSource/SC_LanguageClient.cpp
 	LangSource/SC_LanguageConfig.cpp
 	LangSource/SC_TerminalClient.cpp
@@ -121,14 +120,10 @@ if (AUDIOAPI STREQUAL coreaudio)
     add_definitions("-DSC_AUDIO_API_COREAUDIO")
 elseif (AUDIOAPI STREQUAL portaudio)
     if (SYSTEM_PORTAUDIO)
-        find_package(Portaudio)
-        if(NOT PORTAUDIO_FOUND)
-            message(FATAL_ERROR "Portaudio selected as audio API, but development files not found")
-        endif()
+        find_package(Portaudio REQUIRED)
     endif()
     add_definitions("-DSC_AUDIO_API_PORTAUDIO")
     list(APPEND sclang_sources ${CMAKE_SOURCE_DIR}/common/SC_PaUtils.cpp)
-    include_directories(${PORTAUDIO_INCLUDE_DIRS})
 elseif(AUDIOAPI STREQUAL bela)
     add_definitions("-DSC_AUDIO_API_BELA")
 endif()
@@ -164,10 +159,6 @@ endif()
 # This sets up the exe icon for windows.
 if(WIN32)
  set(RES_FILES ${CMAKE_SOURCE_DIR}/platform/windows/Resources/sclang.rc)
- set(CMAKE_RC_COMPILER_INIT windres)
- ENABLE_LANGUAGE(RC)
- SET(CMAKE_RC_COMPILE_OBJECT
- "<CMAKE_RC_COMPILER> -O coff <DEFINES> -i <SOURCE> -o <OBJECT>")
 endif(WIN32)
 
 if(SC_HIDAPI)
@@ -176,7 +167,7 @@ if(SC_HIDAPI)
         ${CMAKE_SOURCE_DIR}/external_libraries/hidapi/hidapi
         ${CMAKE_SOURCE_DIR}/external_libraries/hidapi/hidapi_parser
     )
-    add_definitions(-DSC_HIDAPI)
+    add_compile_definitions(SC_HIDAPI)
 endif(SC_HIDAPI)
 
 if(SC_QT OR SC_IDE)
@@ -232,6 +223,9 @@ endif()
 if(SC_HIDAPI)
   target_compile_definitions(libsclang PRIVATE HAVE_HIDAPI)
   target_link_libraries( libsclang hidapi hidapi_parser )
+  if(WIN32)
+    target_link_libraries(libsclang hid)
+  endif()
 
   if(${CMAKE_SYSTEM_NAME} MATCHES "Linux" AND HID_HIDRAW)
     target_link_libraries( libsclang ${UDEV_LIBRARIES})
@@ -241,8 +235,13 @@ if(SC_HIDAPI)
   endif()
 endif()
 
-target_link_libraries(libsclang boost_thread_lib boost_system_lib boost_regex_lib)
-target_include_directories(libsclang PUBLIC ${boost_include_dirs})
+target_link_libraries(
+  libsclang 
+  Boost::thread
+  Boost::program_options
+  Boost::regex
+  Boost::sync
+)
 
 if (SCLANG_SERVER)
 	target_link_libraries(libsclang libscsynth)
@@ -301,7 +300,7 @@ if(ALSA_FOUND)
 endif(ALSA_FOUND)
 
 if (AUDIOAPI STREQUAL portaudio)
-    target_link_libraries(libsclang ${PORTAUDIO_LIBRARIES})
+    target_link_libraries(libsclang PortAudio::PortAudio)
 endif()
 
 if(SNDFILE_FOUND)
@@ -325,9 +324,7 @@ if (FFTW3F_FOUND)
 	target_link_libraries(libsclang ${FFTW3F_LIBRARY})
 endif()
 
-if (WIN32 AND SC_HIDAPI)
-	target_link_libraries(libsclang wsock32 ws2_32 portmidi iphlpapi hid)
-elseif(WIN32)
+if(WIN32)
 	target_link_libraries(libsclang wsock32 ws2_32 portmidi iphlpapi)
 endif()
 

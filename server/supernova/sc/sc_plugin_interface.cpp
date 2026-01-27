@@ -37,9 +37,8 @@
 
 #include "SC_Prototypes.h"
 #include "SC_Unit.h"
-#include "SC_Lock.h"
 #include "clz.h"
-#include "SC_fftlib.h"
+#include "SC_fftlib.hpp"
 #include "SC_Lock.h"
 #include "../../common/Samp.hpp"
 #include "../../common/SC_SndFileHelpers.hpp"
@@ -294,29 +293,29 @@ void free_parent_group(Unit* unit) {
     sc_factory->add_done_node(group);
 }
 
-bool get_scope_buffer(World* inWorld, int index, int channels, int maxFrames, ScopeBufferHnd& hnd) {
+SCBool get_scope_buffer(World* inWorld, int32 index, int32 channels, int32 maxFrames, ScopeBufferHnd* hnd) {
     scope_buffer_writer writer = instance->get_scope_buffer_writer(index, channels, maxFrames);
 
     if (writer.valid()) {
-        hnd.internalData = writer.buffer;
-        hnd.data = writer.data();
-        hnd.channels = channels;
-        hnd.maxFrames = maxFrames;
+        hnd->internalData = writer.buffer;
+        hnd->data = writer.data();
+        hnd->channels = channels;
+        hnd->maxFrames = maxFrames;
         return true;
     } else {
-        hnd.internalData = nullptr;
+        hnd->internalData = nullptr;
         return false;
     }
 }
 
-void push_scope_buffer(World* inWorld, ScopeBufferHnd& hnd, int frames) {
-    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd.internalData));
+void push_scope_buffer(World* inWorld, ScopeBufferHnd* hnd, int frames) {
+    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd->internalData));
     writer.push(frames);
-    hnd.data = writer.data();
+    hnd->data = writer.data();
 }
 
-void release_scope_buffer(World* inWorld, ScopeBufferHnd& hnd) {
-    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd.internalData));
+void release_scope_buffer(World* inWorld, ScopeBufferHnd* hnd) {
+    scope_buffer_writer writer(reinterpret_cast<scope_buffer*>(hnd->internalData));
     instance->release_scope_buffer_writer(writer);
 }
 
@@ -325,26 +324,26 @@ void release_scope_buffer(World* inWorld, ScopeBufferHnd& hnd) {
 
 extern "C" {
 
-bool define_unit(const char* inUnitClassName, size_t inAllocSize, UnitCtorFunc inCtor, UnitDtorFunc inDtor,
-                 uint32 inFlags) {
+SCBool define_unit(const char* inUnitClassName, size_t inAllocSize, UnitCtorFunc inCtor, UnitDtorFunc inDtor,
+                   uint32 inFlags) {
     try {
         nova::sc_factory->register_ugen(inUnitClassName, inAllocSize, inCtor, inDtor, inFlags);
         return true;
     } catch (...) { return false; }
 }
 
-bool define_bufgen(const char* name, BufGenFunc func) {
+SCBool define_bufgen(const char* name, BufGenFunc func) {
     try {
         nova::sc_factory->register_bufgen(name, func);
         return true;
     } catch (...) { return false; }
 }
 
-bool define_unitcmd(const char* unitClassName, const char* cmdName, UnitCmdFunc inFunc) {
+SCBool define_unitcmd(const char* unitClassName, const char* cmdName, UnitCmdFunc inFunc) {
     return nova::sc_factory->register_ugen_command_function(unitClassName, cmdName, inFunc);
 }
 
-bool define_plugincmd(const char* name, PlugInCmdFunc func, void* user_data) {
+SCBool define_plugincmd(const char* name, PlugInCmdFunc func, void* user_data) {
     return nova::sc_factory->register_cmd_plugin(name, func, user_data);
 }
 
@@ -550,24 +549,24 @@ void send_node_reply(Node* node, int reply_id, const char* command_name, int arg
     nova::instance->send_node_reply(node->mID, reply_id, command_name, argument_count, values);
 }
 
-int do_asynchronous_command(
+SCErr do_asynchronous_command(
     World* inWorld, void* replyAddr, const char* cmdName, void* cmdData,
     AsyncStageFn stage2, // stage2 is non real time
     AsyncStageFn stage3, // stage3 is real time - completion msg performed if stage3 returns true
     AsyncStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
-    AsyncFreeFn cleanup, int completionMsgSize, void* completionMsgData) {
+    AsyncFreeFn cleanup, int completionMsgSize, const void* completionMsgData) {
     nova::instance->do_asynchronous_command(inWorld, replyAddr, cmdName, cmdData, stage2, stage3, stage4, cleanup,
                                             completionMsgSize, completionMsgData);
     return 0;
 }
 
-bool send_message_from_RT(World* world, struct FifoMsg& msg) {
-    nova::instance->send_message_from_RT(world, msg);
+SCBool send_message_from_RT(World* world, struct FifoMsg* msg) {
+    nova::instance->send_message_from_RT(world, *msg);
     return true;
 }
 
-bool send_message_to_RT(World* world, struct FifoMsg& msg) {
-    nova::instance->send_message_to_RT(world, msg);
+SCBool send_message_to_RT(World* world, struct FifoMsg* msg) {
+    nova::instance->send_message_to_RT(world, *msg);
     return true;
 }
 
@@ -828,6 +827,7 @@ static inline size_t compute_remaining_samples(size_t frames_per_read, size_t al
     return remain;
 }
 
+#ifndef NO_LIBSNDFILE
 void read_channel(SndfileHandle& sf, uint32_t channel_count, const uint32_t* channel_data, uint32 total_frames,
                   sample* data) {
     const unsigned int frames_per_read = 1024;
@@ -860,6 +860,7 @@ void read_channel(SndfileHandle& sf, uint32_t channel_count, const uint32_t* cha
         }
     }
 }
+#endif
 
 } /* namespace */
 
@@ -883,13 +884,14 @@ void sc_plugin_interface::allocate_buffer(SndBuf* buf, uint32_t frames, uint32_t
     buf->isLocal = false;
 }
 
-SndBuf* sc_plugin_interface::allocate_buffer(uint32_t index, uint32_t frames, uint32_t channels) {
+SndBuf* sc_plugin_interface::allocate_buffer(uint32_t index, uint32_t frames, uint32_t channels, double samplerate) {
     SndBuf* buf = World_GetNRTBuf(&world, index);
-    allocate_buffer(buf, frames, channels, world.mFullRate.mSampleRate);
+    allocate_buffer(buf, frames, channels, samplerate);
     return buf;
 }
 
 void sc_plugin_interface::buffer_read_alloc(uint32_t index, const char* filename, uint32_t start, uint32_t frames) {
+#ifndef NO_LIBSNDFILE
     auto f = makeSndfileHandle(filename);
     if (f.rawHandle() == nullptr)
         throw std::runtime_error(f.strError());
@@ -907,12 +909,16 @@ void sc_plugin_interface::buffer_read_alloc(uint32_t index, const char* filename
 
     f.seek(start, SEEK_SET);
     f.readf(buf->data, frames);
+#else
+    throw std::runtime_error("cannot read buffer as supernova was compiled without libsndfile; buffer not allocated");
+#endif
 }
 
 
 void sc_plugin_interface::buffer_alloc_read_channels(uint32_t index, const char* filename, uint32_t start,
                                                      uint32_t frames, uint32_t channel_count,
                                                      const uint32_t* channel_data) {
+#ifndef NO_LIBSNDFILE
     // If no channel argument provided we read all channels.
     if (channel_count == 0) {
         buffer_read_alloc(index, filename, start, frames);
@@ -941,11 +947,16 @@ void sc_plugin_interface::buffer_alloc_read_channels(uint32_t index, const char*
 
     f.seek(start, SEEK_SET);
     read_channel(f, channel_count, channel_data, frames, buf->data);
+#else
+    throw std::runtime_error(
+        "cannot read channel(s) as supernova was compiled without libsndfile; buffer not allocated");
+#endif
 }
 
 
 void sc_plugin_interface::buffer_write(uint32_t index, const char* filename, const char* header_format,
                                        const char* sample_format, uint32_t start, uint32_t frames, bool leave_open) {
+#ifndef NO_LIBSNDFILE
     SndBuf* buf = World_GetNRTBuf(&world, index);
     int format = headerFormatFromString(header_format) | sampleFormatFromString(sample_format);
 
@@ -965,8 +976,12 @@ void sc_plugin_interface::buffer_write(uint32_t index, const char* filename, con
 
     if (leave_open && !buf->sndfile)
         buf->sndfile = sf.takeOwnership();
+#else
+    throw std::runtime_error("cannot write to buffer as supernova was compiled without libsndfile");
+#endif
 }
 
+#ifndef NO_LIBSNDFILE
 static void buffer_read_verify(SndfileHandle& sf, size_t min_length, size_t samplerate, bool check_samplerate) {
     if (sf.rawHandle() == nullptr)
         throw std::runtime_error(sf.strError());
@@ -976,9 +991,11 @@ static void buffer_read_verify(SndfileHandle& sf, size_t min_length, size_t samp
     if (check_samplerate && (sf.samplerate() != samplerate))
         throw std::runtime_error("sample rate mismatch");
 }
+#endif
 
 void sc_plugin_interface::buffer_read(uint32_t index, const char* filename, uint32_t start_file, uint32_t frames,
                                       uint32_t start_buffer, bool leave_open) {
+#ifndef NO_LIBSNDFILE
     SndBuf* buf = World_GetNRTBuf(&world, index);
 
     if (uint32_t(buf->frames) < start_buffer)
@@ -999,11 +1016,15 @@ void sc_plugin_interface::buffer_read(uint32_t index, const char* filename, uint
 
     if (leave_open)
         buf->sndfile = sf.takeOwnership();
+#else
+    throw std::runtime_error("cannot read buffer as supernova was compiled without libsndfile");
+#endif
 }
 
 void sc_plugin_interface::buffer_read_channel(uint32_t index, const char* filename, uint32_t start_file,
                                               uint32_t frames, uint32_t start_buffer, bool leave_open,
                                               uint32_t channel_count, const uint32_t* channel_data) {
+#ifndef NO_LIBSNDFILE
     SndBuf* buf = World_GetNRTBuf(&world, index);
 
     if (channel_count != uint32_t(buf->channels))
@@ -1030,14 +1051,18 @@ void sc_plugin_interface::buffer_read_channel(uint32_t index, const char* filena
 
     if (leave_open)
         buf->sndfile = sf.takeOwnership();
+#else
+    throw std::runtime_error("cannot read buffer channel as supernova was compiled without libsndfile");
+#endif
 }
 
 void sc_plugin_interface::buffer_close(uint32_t index) {
     SndBuf* buf = World_GetNRTBuf(&world, index);
-
+#ifndef NO_LIBSNDFILE
     if (buf->sndfile == nullptr)
         return;
     sf_close(GETSNDFILE(buf));
+#endif
     buf->sndfile = nullptr;
 }
 
@@ -1065,9 +1090,10 @@ void sc_plugin_interface::buffer_sync(uint32_t index) noexcept {
 
 void sc_plugin_interface::free_buffer(uint32_t index) {
     SndBuf* buf = world.mSndBufsNonRealTimeMirror + index;
+#ifndef NO_LIBSNDFILE
     if (buf->sndfile)
         sf_close(GETSNDFILE(buf));
-
+#endif
     sndbuf_init(buf);
 }
 

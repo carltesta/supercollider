@@ -60,7 +60,7 @@ struct FifoMsg;
 
 namespace nova {
 
-typedef bool (*AsyncStageFn)(World* inWorld, void* cmdData);
+typedef SCBool (*AsyncStageFn)(World* inWorld, void* cmdData);
 typedef void (*AsyncFreeFn)(World* inWorld, void* cmdData);
 
 namespace detail {
@@ -339,7 +339,7 @@ public:
 
     void do_asynchronous_command(World* world, void* replyAddr, const char* cmdName, void* cmdData, AsyncStageFn stage2,
                                  AsyncStageFn stage3, AsyncStageFn stage4, AsyncFreeFn cleanup, int completionMsgSize,
-                                 void* completionMsgData) const;
+                                 const void* completionMsgData) const;
 
     void send_message_from_RT(const World* world, FifoMsg& msg) const;
 
@@ -355,6 +355,10 @@ private:
     const char* tcp_password_; /* we are not owning this! */
 
     std::array<char, 1 << 15> recv_buffer_;
+
+    static constexpr int udp_receive_buffer_size = 4 * 1024 * 1024;
+    static constexpr int udp_send_buffer_size = 4 * 1024 * 1024;
+    static constexpr int udp_fallback_buffer_size = 1 * 1024 * 1024;
     /* @} */
 };
 
